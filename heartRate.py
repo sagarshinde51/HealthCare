@@ -1,71 +1,75 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine
+import mysql.connector
 
-# Streamlit Page Setup
+# Page Configuration
 st.set_page_config(page_title="Heart Rate & Sensor Dashboard", layout="wide")
-st.title("🫀 Patient & Environmental Sensor Data")
+st.title("🫀 Sensor Data Monitor (MySQL)")
 
 # Database Credentials
-DB_HOST = "82.180.143.66"
-DB_USER = "u263681140_students"
-DB_PASS = "testStudents@123"
-DB_NAME = "u263681140_students"
-DB_PORT = 3306
+DB_CONFIG = {
+    "host": "82.180.143.66",
+    "user": "u263681140_students",
+    "password": "testStudents@123",
+    "database": "u263681140_students",
+    "port": 3306
+}
 
-@st.cache_data(ttl=5)  # Auto-refresh cache every 5 seconds
+@st.cache_data(ttl=5)  # Cache refreshes every 5 seconds
 def load_data():
-    connection_url = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    engine = create_engine(connection_url)
+    conn = mysql.connector.connect(**DB_CONFIG)
     query = "SELECT * FROM heart_rate ORDER BY Date_Time DESC"
     
-    with engine.connect() as conn:
-        df = pd.read_sql(query, conn)
+    # Read directly into a DataFrame
+    df = pd.read_sql(query, conn)
+    conn.close()
     return df
 
-# Fetch Data
+# Fetch and display data
 try:
     df = load_data()
 
     if not df.empty:
-        # Display Latest Metrics
+        # Latest Readings Metrics
         latest = df.iloc[0]
         st.subheader("Latest Readings")
         col1, col2, col3, col4, col5 = st.columns(5)
-        
-        col1.metric("Body Temp (°F/°C)", f"{latest['Body_temp']:.1f}")
-        col2.metric("Oxygen (SpO2 %)", f"{latest['Oxygen']:.1f}%")
-        col3.metric("Heart Rate (BPM)", f"{latest['Heart_Rate']:.0f}")
-        col4.metric("Room Temp (°C)", f"{latest['Temp']:.1f}")
-        col5.metric("Humidity (%)", f"{latest['Humi']:.1f}%")
+
+        col1.metric("Body Temp", f"{float(latest['Body_temp']):.1f}")
+        col2.metric("Oxygen (SpO2)", f"{float(latest['Oxygen']):.1f}%")
+        col3.metric("Heart Rate", f"{float(latest['Heart_Rate']):.0f} BPM")
+        col4.metric("Room Temp", f"{float(latest['Temp']):.1f}°C")
+        col5.metric("Humidity", f"{float(latest['Humi']):.1f}%")
 
         st.divider()
 
-        # Graphs Section
+        # Trend Charts
         st.subheader("Vitals Trends")
         chart_col1, chart_col2 = st.columns(2)
-        
+
         with chart_col1:
-            st.write("**Heart Rate & Oxygen**")
+            st.write("**Heart Rate & Oxygen Level**")
             st.line_chart(df.set_index("Date_Time")[["Heart_Rate", "Oxygen"]])
 
         with chart_col2:
-            st.write("**Body & Room Temperature**")
+            st.write("**Body Temp vs Room Temp**")
             st.line_chart(df.set_index("Date_Time")[["Body_temp", "Temp"]])
 
         st.divider()
 
-        # Raw Data Table
-        st.subheader("All Records")
+        # Data Table
+        st.subheader("Recorded History")
         st.dataframe(df, use_container_width=True)
 
     else:
-        st.warning("No data found in the `heart_rate` table.")
+        st.warning("Table `heart_rate` is currently empty.")
 
+except mysql.connector.Error as e:
+    st.error(f"MySQL Connection Error: {e}")
 except Exception as e:
-    st.error(f"Error connecting to the database: {e}")
+    st.error(f"An error occurred: {e}")
 
 # Manual Refresh Button
-if st.button("Refresh Data"):
+if st.button("Refresh Now"):
     st.cache_data.clear()
     st.rerun()
