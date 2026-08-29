@@ -1,75 +1,100 @@
 import streamlit as st
 import pandas as pd
 import mysql.connector
+import plotly.express as px
 
-# Page Configuration
-st.set_page_config(page_title="Heart Rate & Sensor Dashboard", layout="wide")
-st.title("🫀 Sensor Data Monitor (MySQL)")
-
-# Database Credentials
+# --- CONFIGURATION ---
 DB_CONFIG = {
     "host": "82.180.143.66",
     "user": "u263681140_students",
     "password": "testStudents@123",
-    "database": "u263681140_students",
-    "port": 3306
+    "database": "u263681140_students"
 }
 
-@st.cache_data(ttl=5)  # Cache refreshes every 5 seconds
-def load_data():
-    conn = mysql.connector.connect(**DB_CONFIG)
-    query = "SELECT * FROM heart_rate ORDER BY Date_Time DESC"
+DEFAULT_USER = "admin"
+DEFAULT_PASS = "admin123"
+
+# --- FUNCTIONS ---
+def get_data():
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        query = "SELECT * FROM heart_rate ORDER BY Date_Time DESC"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        
+        # Convert numeric columns from string/decimal to float for graphing
+        numeric_cols = ['Body_temp', 'Oxygen', 'Heart_Rate', 'Temp', 'Humi']
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df['Date_Time'] = pd.to_datetime(df['Date_Time'])
+        return df
+    except Exception as e:
+        st.error(f"Error connecting to DB: {e}")
+        return pd.DataFrame()
+
+# --- LOGIN UI ---
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+if not st.session_state['logged_in']:
+    st.title("Health & Vitals Login")
+    user = st.text_input("Username")
+    pwd = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if user == DEFAULT_USER and pwd == DEFAULT_PASS:
+            st.session_state['logged_in'] = True
+            st.rerun()
+        else:
+            st.error("Invalid Username or Password")
+else:
+    # --- MAIN APP ---
+    st.sidebar.title("Navigation")
+    if st.sidebar.button("Logout"):
+        st.session_state['logged_in'] = False
+        st.rerun()
+
+    st.title("❤️ Heart Rate & Vitals Dashboard")
     
-    # Read directly into a DataFrame
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df
-
-# Fetch and display data
-try:
-    df = load_data()
-
+    df = get_data()
+    
     if not df.empty:
-        # Latest Readings Metrics
-        latest = df.iloc[0]
-        st.subheader("Latest Readings")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        tab1, tab2 = st.tabs(["📍 Latest Data", "📊 Trends & History"])
 
-        col1.metric("Body Temp", f"{float(latest['Body_temp']):.1f}")
-        col2.metric("Oxygen (SpO2)", f"{float(latest['Oxygen']):.1f}%")
-        col3.metric("Heart Rate", f"{float(latest['Heart_Rate']):.0f} BPM")
-        col4.metric("Room Temp", f"{float(latest['Temp']):.1f}°C")
-        col5.metric("Humidity", f"{float(latest['Humi']):.1f}%")
+        with tab1:
+            st.subheader("Most Recent Reading")
+            latest = df.iloc[0]
+            
+            # Primary vitals metrics
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Heart Rate", f"{latest['Heart_Rate']} BPM")
+            col2.metric("Oxygen (SpO2)", f"{latest['Oxygen']}%")
+            col3.metric("Body Temp", f"{latest['Body_temp']}°C")
 
-        st.divider()
+            # Environmental ambient metrics
+            col4, col5 = st.columns(2)
+            col4.metric("Ambient Temp", f"{latest['Temp']}°C")
+            col5.metric("Humidity", f"{latest['Humi']}%")
+            
+            st.write(f"**Last Updated:** {latest['Date_Time']}")
 
-        # Trend Charts
-        st.subheader("Vitals Trends")
-        chart_col1, chart_col2 = st.columns(2)
-
-        with chart_col1:
-            st.write("**Heart Rate & Oxygen Level**")
-            st.line_chart(df.set_index("Date_Time")[["Heart_Rate", "Oxygen"]])
-
-        with chart_col2:
-            st.write("**Body Temp vs Room Temp**")
-            st.line_chart(df.set_index("Date_Time")[["Body_temp", "Temp"]])
-
-        st.divider()
-
-        # Data Table
-        st.subheader("Recorded History")
-        st.dataframe(df, use_container_width=True)
-
+        with tab2:
+            st.subheader("Visual Vitals Trends")
+            
+            # Prepare data for Plotly (melting for different colors)
+            df_melted = df.melt(id_vars=['Date_Time'], 
+                                value_vars=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi'],
+                                var_name='Metric', value_name='Value')
+            
+            fig = px.line(df_melted, x='Date_Time', y='Value', color='Metric',
+                          title="All Vitals Parameters Over Time",
+                          labels={"Value": "Measurement", "Date_Time": "Time"},
+                          template="plotly_dark")
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.divider()
+            st.subheader("Historical Data Table")
+            st.dataframe(df, use_container_width=True)
     else:
-        st.warning("Table `heart_rate` is currently empty.")
-
-except mysql.connector.Error as e:
-    st.error(f"MySQL Connection Error: {e}")
-except Exception as e:
-    st.error(f"An error occurred: {e}")
-
-# Manual Refresh Button
-if st.button("Refresh Now"):
-    st.cache_data.clear()
-    st.rerun()
+        st.warning("No data found in the database.")
